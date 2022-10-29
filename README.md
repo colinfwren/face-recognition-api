@@ -7,6 +7,11 @@ The API exposes two POST endpoints:
 - `faces` which adds a face to the database and the remote URL of the image file
 - `faces/searches` which finds a face in the database
 
+## Installing
+- Follow the instructions for [face_recognition](https://github.com/colinfwren/face-recognition-api) installation so you can get `dlib` installed
+- `pip3 -r requirements.txt`
+- You'll need docker and docker compose on your machine to run the PostgreSQL database (or just swap for a local instance)
+
 ## Running
 
 ```
