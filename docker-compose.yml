@@ -1,0 +1,21 @@
+version: '2'
+
+services:
+  postgres:
+    image: postgres:9.6
+    environment:
+      POSTGRES_PASSWORD: pass
+      POSTGRES_USER: user
+      POSTGRES_DB: db
+    ports:
+      - "5434:5432"
+#  api:
+#    build: .
+#    environment:
+#      DATABASE_STRING: "pq://user:pass@postgres:5434/db"
+#    ports:
+#      - "9000:9000"
+#    depends_on:
+#      - postgres
+#    networks:
+#      - default
