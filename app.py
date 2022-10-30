@@ -14,7 +14,18 @@ app.config['UPLOAD_EXTENSIONS'] = ['.jpg', '.png', '.jpeg']
 app.config['UPLOAD_PATH'] = 'uploads'
 
 
-def save_face_to_db(local_filename, remote_file_url):
+def process_face_matches(face_matches):
+    results = []
+    for face_match in face_matches:
+        results.append({
+            'id': face_match[0],
+            'file': face_match[1],
+            'image_id': face_match[2]
+        })
+    return results
+
+
+def save_face_to_db(local_filename, remote_file_url, image_id):
     # Create a HOG face detector using the built-in dlib class
     face_detector = dlib.get_frontal_face_detector()
 
@@ -28,6 +39,7 @@ def save_face_to_db(local_filename, remote_file_url):
     db = postgresql.open(os.environ.get('DATABASE_STRING'))
 
     # Loop through each face we found in the image
+    face_ids = []
     for i, face_rect in enumerate(detected_faces):
         # Detected faces are returned as an object with the coordinates
         # of the top, left, right and bottom edges
@@ -37,14 +49,15 @@ def save_face_to_db(local_filename, remote_file_url):
         encodings = face_recognition.face_encodings(crop)
 
         if len(encodings) > 0:
-            query = "INSERT INTO vectors (file, vec_low, vec_high) VALUES ('{}', CUBE(array[{}]), CUBE(array[{}]))".format(
+            query = "INSERT INTO vectors (file, image_id, vec_low, vec_high) VALUES ('{}', {}, CUBE(array[{}]), CUBE(array[{}])) RETURNING id".format(
                 remote_file_url,
+                image_id,
                 ','.join(str(s) for s in encodings[0][0:64]),
                 ','.join(str(s) for s in encodings[0][64:128]),
             )
-            db.execute(query)
-            return True
-    return False
+            response = db.query(query)
+            face_ids.append(response[0][0])
+    return face_ids
 
 
 def find_face_in_db(local_filename):
@@ -62,6 +75,7 @@ def find_face_in_db(local_filename):
     db = postgresql.open(os.environ.get('DATABASE_STRING'))
 
     # Loop through each face we found in the image
+    face_records = []
     for i, face_rect in enumerate(detected_faces):
         # Detected faces are returned as an object with the coordinates
         # of the top, left, right and bottom edges
@@ -72,7 +86,7 @@ def find_face_in_db(local_filename):
         encodings = face_recognition.face_encodings(crop)
         threshold = 0.6
         if len(encodings) > 0:
-            query = "SELECT file FROM vectors WHERE sqrt(power(CUBE(array[{}]) <-> vec_low, 2) + power(CUBE(array[{}]) <-> vec_high, 2)) <= {} ".format(
+            query = "SELECT id, file, image_id FROM vectors WHERE sqrt(power(CUBE(array[{}]) <-> vec_low, 2) + power(CUBE(array[{}]) <-> vec_high, 2)) <= {} ".format(
                 ','.join(str(s) for s in encodings[0][0:64]),
                 ','.join(str(s) for s in encodings[0][64:128]),
                 threshold,
@@ -81,9 +95,9 @@ def find_face_in_db(local_filename):
                         ','.join(str(s) for s in encodings[0][0:64]),
                         ','.join(str(s) for s in encodings[0][64:128]),
                     )
-            return db.query(query)
-        else:
-            return []
+            face_record = db.query(query)
+            face_records.append(process_face_matches(face_record))
+    return face_records
 
 
 def validate_image(stream):
@@ -109,16 +123,17 @@ def index():
 def faces():
     uploaded_file = request.files['file']
     file_url = request.form.get('url', False)
+    image_id = request.form.get('image_id', 0)
     filename = secure_filename(uploaded_file.filename)
-    if filename != '' and file_url:
-        file_ext = os.path.splitext(filename)[1]
+    if filename != '' and file_url and image_id:
+        file_ext = os.path.splitext(file_url)[1]
         if file_ext in app.config['UPLOAD_EXTENSIONS']:  # and file_ext == validate_image(uploaded_file.stream):
             file_path = os.path.join(app.config['UPLOAD_PATH'], filename)
             uploaded_file.save(file_path)
-            face_added = save_face_to_db(file_path, file_url)
+            face_added = save_face_to_db(file_path, file_url, image_id)
             os.remove(file_path)
             if face_added:
-                return make_response(jsonify(status='PROCESSED'), 201)
+                return make_response(jsonify(status='PROCESSED', ids=face_added), 201)
             else:
                 return make_response(jsonify(status='FAILED'), 500)
     return make_response(jsonify(error='Invalid file or URL'), 400)
@@ -135,7 +150,7 @@ def faces_searches():
             uploaded_file.save(file_path)
             face_matches = find_face_in_db(file_path)
             os.remove(file_path)
-            return make_response(jsonify(matches=[item for sublist in face_matches for item in sublist]), 200)
+            return make_response(jsonify(matches=face_matches[0]), 200)
     return make_response(jsonify(error='Invalid file'), 400)
 
 
